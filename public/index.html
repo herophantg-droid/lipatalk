@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>lipatalk — голосовые комнаты</title>
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+
+<div class="bg-orbs"><i></i><i></i><i></i></div>
+
+<!-- LOBBY -->
+<section id="lobby" class="screen active">
+  <div class="lobby-wrap">
+    <div class="brand">
+      <div class="brand-mark">N<span>R</span></div>
+      <div>
+        <h1>lipa<span>talk</span></h1>
+        <p>голосовые комнаты, которые не скучают</p>
+      </div>
+    </div>
+
+    <div class="lobby-card glass">
+      <div class="tabs">
+        <button class="tab active" data-tab="create">Создать комнату</button>
+        <button class="tab" data-tab="join">Войти по коду</button>
+      </div>
+
+      <div class="room-list-wrap">
+        <div class="list-head"><b>Комнаты</b><button id="refresh-rooms" title="Обновить">↻</button></div>
+        <div id="room-list" class="room-list"><div class="hint">загрузка…</div></div>
+      </div>
+
+      <div id="tab-create" class="tab-body">
+        <label class="field">
+          <span>Как тебя зовут</span>
+          <input id="create-name" type="text" maxlength="24" placeholder="Например, Чумба" autocomplete="off">
+        </label>
+        <label class="field">
+          <span>Название комнаты</span>
+          <input id="room-title" type="text" maxlength="40" placeholder="Ночной созвон" value="Ночной созвон">
+        </label>
+        <div class="row">
+          <div class="avatar-pick">
+            <div id="avatar-preview" class="avatar big">🙂</div>
+            <div>
+              <button class="mini" id="avatar-upload-btn">Загрузить аватарку</button>
+              <div class="hint">или выбери эмодзи</div>
+              <div id="emoji-picks" class="emoji-picks"></div>
+            </div>
+          </div>
+        </div>
+        <div class="field">
+          <span>Фон комнаты</span>
+          <div id="bg-picks" class="bg-picks"></div>
+        </div>
+        <button id="create-btn" class="primary big-btn">Создать комнату <b>→</b></button>
+        <div class="limits" id="free-limits">Free: 4 участника · 2 комнаты · 3 часа на комнату</div>
+      </div>
+
+      <div id="tab-join" class="tab-body hidden">
+        <label class="field">
+          <span>Как тебя зовут</span>
+          <input id="join-name" type="text" maxlength="24" placeholder="Например, Чумба" autocomplete="off">
+        </label>
+        <label class="field">
+          <span>Код комнаты</span>
+          <input id="join-code" type="text" maxlength="8" placeholder="ABC123" autocomplete="off" style="text-transform:uppercase;letter-spacing:.25em">
+        </label>
+        <label class="field">
+          <span>Ключ шифрования <small>(из ссылки #k=..., если входишь по коду)</small></span>
+          <input id="join-key" type="text" placeholder="Вставить ключ" autocomplete="off">
+        </label>
+        <button id="join-btn" class="primary big-btn">Войти <b>→</b></button>
+      </div>
+
+      <div class="lobby-footer">
+        <button id="pro-toggle" class="ghost">Pro: выкл <span class="pill">демо</span></button>
+        <span>без регистрации · ссылка с 🔒 E2EE</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ROOM -->
+<section id="room" class="screen">
+  <header class="topbar">
+    <div class="top-left">
+      <div class="brand small"><div class="brand-mark sm">l</div><b>lipatalk</b></div>
+      <span class="divider"></span>
+      <div class="room-title" id="display-title">Комната</div>
+      <button id="copy-link" class="icon-btn" title="Скопировать ссылку">🔗</button>
+    </div>
+    <div class="top-right">
+      <div id="pro-badge" class="pro-badge hidden">PRO</div>
+      <div id="room-timer" class="timer">--:--</div>
+      <button id="settings-btn" class="icon-btn" title="Настройки">⚙</button>
+      <button id="leave-btn" class="danger-btn">Выйти</button>
+    </div>
+  </header>
+
+  <main class="room-main">
+    <div class="stage" id="stage">
+      <canvas id="visualizer"></canvas>
+      <canvas id="silence-fx"></canvas>
+      <div id="participants" class="participants"></div>
+      <div id="reactions" class="reactions"></div>
+      <div id="silence-label" class="silence-label hidden">
+        <span>💤 Тишина — включены эффекты</span>
+        <button id="silence-stop">Выключить ✕</button>
+      </div>
+    </div>
+
+    <aside class="chat glass">
+      <div class="chat-head"><b>Чат</b><span id="chat-count">0</span></div>
+      <div id="chat-messages" class="chat-messages"></div>
+      <form id="chat-form" class="chat-form">
+        <input id="chat-input" maxlength="300" placeholder="Написать..." autocomplete="off">
+        <button type="submit">➤</button>
+      </form>
+      <div class="reactions-bar" id="reactions-bar"></div>
+    </aside>
+  </main>
+
+  <footer class="controls">
+    <button id="mic-btn" class="ctrl" title="Микрофон"><span>🎤</span><label>Микрофон</label></button>
+    <button id="cam-btn" class="ctrl" title="Камера"><span>📷</span><label>Камера</label></button>
+    <button id="screen-btn" class="ctrl" title="Показ экрана"><span>🖥️</span><label>Экран</label></button>
+    <button id="audio-btn" class="ctrl" title="Включить звук участников"><span>🔊</span><label>Звук</label></button>
+    <button id="voice-btn" class="ctrl locked" title="Войс-ченджер"><span>🎛️</span><label>Голос</label><i class="lock">🔒</i></button>
+    <button id="bg-btn" class="ctrl" title="Сменить фон"><span>🎨</span><label>Фон</label></button>
+    <button id="silence-btn" class="ctrl" title="Эффекты тишины"><span>✨</span><label>Тишина</label></button>
+    <div class="mic-widget" title="Уровень твоего микрофона">
+      <select id="mic-select"><option>микрофон…</option></select>
+      <div class="meter mini"><i id="mic-mini"></i></div>
+    </div>
+    <button id="mic-retry" class="danger-btn hidden">🎤 Разрешить микрофон</button>
+    <div class="spacer"></div>
+    <div id="net-status" class="net-status">● подключение</div>
+  </footer>
+</section>
+
+<!-- MODALS -->
+<div id="modal-backdrop" class="modal-backdrop hidden">
+  <div class="modal glass">
+    <button id="modal-close" class="modal-close">✕</button>
+    <div id="modal-content"></div>
+  </div>
+</div>
+<div id="toast" class="toast hidden"></div>
+
+<script src="/app.js"></script>
+</body>
+</html>
