@@ -24,7 +24,7 @@ const S = {
   clientId: null, invited: [], keys: {},
   // E2EE: key comes from the URL fragment (#k=...), never sent to the server.
   inviteKey: null, roomKey: null, roomKeyB64: null, sendSeq: 0,
-  pendingAudio: {}, nextPlaySeq: {}
+  pendingAudio: {}, nextPlaySeq: {}, lastPlayedSeq: {}
 };
 
 /* ---------- utils ---------- */
@@ -206,6 +206,8 @@ async function loadRoomList() {
     if (!list.length) { box.innerHTML = '<div class="hint">пока нет комнат — создай первую</div>'; return; }
     box.innerHTML = '';
     list.forEach(r => {
+      const row = document.createElement('div');
+      row.className = 'room-row-wrap';
       const b = document.createElement('button');
       b.className = 'room-row';
       b.innerHTML = `<span class="dot ${r.pro ? '' : 'free'}"></span>
@@ -213,9 +215,26 @@ async function loadRoomList() {
         ${r.pro ? '<span class="mem">ПАМЯТЬ</span>' : ''}
         <span class="rc">${r.count}/${r.limit} 👤</span>`;
       b.onclick = () => quickJoin(r);
-      box.appendChild(b);
+      row.appendChild(b);
+      if (r.owner === S.clientId) {
+        const del = document.createElement('button');
+        del.className = 'room-del'; del.title = 'Удалить комнату и память'; del.textContent = '✕';
+        del.onclick = e => { e.stopPropagation(); deleteRoom(r); };
+        row.appendChild(del);
+      }
+      box.appendChild(row);
     });
   } catch (_) { box.innerHTML = '<div class="hint">не удалось загрузить список</div>'; }
+}
+async function deleteRoom(room) {
+  if (!confirm('Удалить комнату и всю её память? Это нельзя отменить.')) return;
+  const b = await api('/api/rooms/delete', { roomId: room.id, owner: S.clientId });
+  if (!b.ok) return toast(b.error || 'Не удалось удалить');
+  delete S.keys[room.id];
+  S.invited = S.invited.filter(x => x !== room.id);
+  savePrefs();
+  toast('Комната и память удалены');
+  loadRoomList();
 }
 async function quickJoin(room) {
   const name = S.name || $('#create-name').value.trim() || $('#join-name').value.trim() || 'Гость';
@@ -306,6 +325,8 @@ function connectSSE() {
   on('chat', d => appendChat(d));
   on('reaction', d => spawnReaction(d.emoji));
   on('room-expired', () => { toast('Время комнаты истекло — создай новую'); setTimeout(leaveRoom, 1200); });
+  on('room-deleted', () => { toast('Комната удалена создателем'); setTimeout(leaveRoom, 800); });
+  on('chat-clear', () => { $('#chat-messages').innerHTML = ''; S.chatCount = 0; $('#chat-count').textContent = '0'; toast('Память комнаты очищена'); });
 }
 
 /* ---------- media ---------- */
@@ -329,7 +350,10 @@ async function initMedia() {
   }
   try {
     if (S.rawStream) S.rawStream.getTracks().forEach(t => t.stop());
-    S.rawStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true }, video: false });
+    S.rawStream = await navigator.mediaDevices.getUserMedia({ audio: {
+      echoCancellation: true, noiseSuppression: true, autoGainControl: true,
+      channelCount: 1, sampleRate: 48000
+    }, video: false });
     S.rawStream.getAudioTracks().forEach(t => t.enabled = true);
     S.micOn = true;
     if (!S.dummyVideoTrack || S.dummyVideoTrack.readyState === 'ended') S.dummyVideoTrack = makeDummyVideoTrack();
@@ -366,7 +390,10 @@ async function populateMicDevices() {
 async function switchMic(deviceId) {
   try {
     if (S.rawStream) S.rawStream.getTracks().forEach(t => t.stop());
-    S.rawStream = await navigator.mediaDevices.getUserMedia({ audio: { deviceId: { exact: deviceId } }, video: false });
+    S.rawStream = await navigator.mediaDevices.getUserMedia({ audio: {
+      deviceId: { exact: deviceId }, echoCancellation: true,
+      noiseSuppression: true, autoGainControl: true, channelCount: 1
+    }, video: false });
     S.rawStream.getAudioTracks().forEach(t => t.enabled = true);
     S.micOn = true;
     buildAudioGraph();
@@ -397,8 +424,13 @@ function buildAudioGraph() {
     S.analyser = S.audioCtx.createAnalyser();
     S.analyser.fftSize = 1024;
     S.dest = S.audioCtx.createMediaStreamDestination();
-    let node = S.source;
-    node.connect(S.analyser);
+    S.source.connect(S.analyser);
+    // Noise suppression: browser NS + high-pass to cut rumble/hum.
+    const hp = S.audioCtx.createBiquadFilter();
+    hp.type = 'highpass'; hp.frequency.value = 90; hp.Q.value = 0.7;
+    S.source.connect(hp);
+    S.effectNodes.push(hp);
+    let node = hp;
     const fx = S.effect;
     if (fx === 'robot') {
       const ws = S.audioCtx.createWaveShaper(); ws.curve = makeCurve('robot');
@@ -427,6 +459,9 @@ function buildAudioGraph() {
     S.stream = S.rawStream;
   }
   replaceAudioEverywhere(S.stream?.getAudioTracks()[0] || null);
+  // The voice changer creates a new output stream — the relay must be rebound
+  // to it, otherwise the old AudioContext keeps sending silence.
+  if (S.roomId && S.micOn) startAudioRelay();
 }
 
 function currentVideoTrack() {
@@ -477,20 +512,14 @@ async function playAudioChunk(from, data) {
   if (!data || from === S.peerId) return;
   try {
     const { pt, seq } = await open(data);
-    if (seq === null) { playPCM(from, pt); return; }
-    S.pendingAudio[from] = S.pendingAudio[from] || new Map();
-    if (S.nextPlaySeq[from] === undefined) S.nextPlaySeq[from] = seq;
-    S.pendingAudio[from].set(seq, pt);
-    // Play in sender order; drop late/duplicate chunks.
-    if (seq < S.nextPlaySeq[from]) S.pendingAudio[from].delete(seq);
-    let guard = 0;
-    while (S.pendingAudio[from].has(S.nextPlaySeq[from]) && guard++ < 30) {
-      const chunk = S.pendingAudio[from].get(S.nextPlaySeq[from]);
-      S.pendingAudio[from].delete(S.nextPlaySeq[from]);
-      playPCM(from, chunk);
-      S.nextPlaySeq[from]++;
+    // Play chunks as they arrive. A single lost SSE chunk must not block all
+    // later audio from this peer (that used to make one person go silent).
+    if (seq !== null) {
+      const last = S.lastPlayedSeq[from];
+      if (last !== undefined && seq <= last) return;
+      S.lastPlayedSeq[from] = seq;
     }
-    if (S.pendingAudio[from].size > 40) S.pendingAudio[from].clear();
+    playPCM(from, pt);
   } catch (e) { console.warn('decrypt audio chunk', e); }
 }
 function playPCM(from, bytes) {
@@ -522,7 +551,12 @@ function startVideoRelay() {
     if (v.srcObject !== S.videoStream) { v.srcObject = S.videoStream; v.play().catch(() => {}); }
     if (v.readyState < 2) return;
     if (S.videoSealing) return;
-    g.drawImage(v, 0, 0, 640, 360);
+    // Keep the camera aspect ratio: letterbox instead of stretching to 640x360.
+    const vw = v.videoWidth || 640, vh = v.videoHeight || 360;
+    const scale = Math.min(640 / vw, 360 / vh);
+    const dw = vw * scale, dh = vh * scale;
+    g.fillStyle = '#000'; g.fillRect(0, 0, 640, 360);
+    g.drawImage(v, (640 - dw) / 2, (360 - dh) / 2, dw, dh);
     const data = canvas.toDataURL('image/jpeg', 0.45);
     S.videoSealing = true;
     seal(new TextEncoder().encode(data)).then(enc => {
@@ -827,8 +861,9 @@ function setMicUI() {
 }
 function initControls() {
   document.addEventListener('click', () => {
-    if (S.audioCtx && S.audioCtx.state === 'suspended') S.audioCtx.resume().catch(() => {});
-    if (S.playCtx && S.playCtx.state === 'suspended') S.playCtx.resume().catch(() => {});
+    [S.audioCtx, S.relayCtx, S.playCtx].forEach(c => {
+      if (c && c.state === 'suspended') c.resume().catch(() => {});
+    });
     S.remoteAudios.forEach(a => a.play().catch(() => {}));
   }, true);
   $('#mic-retry').onclick = () => { initMedia().then(() => { pushState(); renderPeers(); }); };
@@ -865,8 +900,9 @@ function initControls() {
     pushState(); renderPeers();
   };
   $('#audio-btn').onclick = () => {
-    if (S.audioCtx && S.audioCtx.state === 'suspended') S.audioCtx.resume().catch(() => {});
-    if (S.playCtx && S.playCtx.state === 'suspended') S.playCtx.resume().catch(() => {});
+    [S.audioCtx, S.relayCtx, S.playCtx].forEach(c => {
+      if (c && c.state === 'suspended') c.resume().catch(() => {});
+    });
     S.remoteAudios.forEach(a => { a.muted = false; a.play().catch(() => {}); });
     toast('Звук включён');
   };
@@ -882,6 +918,23 @@ function initControls() {
   $('#copy-link').onclick = () => {
     navigator.clipboard?.writeText(inviteURL(S.roomId));
     toast('Ссылка с ключом скопирована 🔒');
+  };
+  $('#clear-memory-btn').onclick = async () => {
+    if (!S.room) return;
+    if (S.room.owner !== S.clientId) return toast('Очищать может только создатель');
+    if (!confirm('Очистить историю чата этой комнаты?')) return;
+    const b = await api('/api/rooms/clear', { roomId: S.roomId, owner: S.clientId });
+    toast(b.ok ? 'Память очищена' : (b.error || 'Не удалось'));
+  };
+  $('#delete-room-btn').onclick = async () => {
+    if (!S.room) return;
+    if (S.room.owner !== S.clientId) return toast('Удалять может только создатель');
+    if (!confirm('Удалить комнату и всю её память? Это нельзя отменить.')) return;
+    const b = await api('/api/rooms/delete', { roomId: S.roomId, owner: S.clientId });
+    if (!b.ok) return toast(b.error || 'Не удалось удалить');
+    delete S.keys[S.roomId]; savePrefs();
+    toast('Комната удалена');
+    leaveRoom();
   };
   $('#leave-btn').onclick = leaveRoom;
   $('#modal-close').onclick = closeModal;
@@ -1007,7 +1060,11 @@ initLobby();
 initControls();
 startFxLoop();
 setInterval(updateMicMeters, 100);
-setInterval(() => { if (S.audioCtx && S.audioCtx.state === 'suspended') S.audioCtx.resume().catch(() => {}); }, 500);
+setInterval(() => {
+  [S.audioCtx, S.relayCtx, S.playCtx].forEach(c => {
+    if (c && c.state === 'suspended') c.resume().catch(() => {});
+  });
+}, 500);
 setInterval(() => { if (!S.room) loadRoomList(); }, 10000);
 window.__NR = S; // debug handle
 if (params.get('room')) {
