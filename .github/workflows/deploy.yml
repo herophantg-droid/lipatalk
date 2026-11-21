@@ -27,4 +27,4 @@ jobs:
       - name: Deploy to Railway
         env:
           RAILWAY_TOKEN: ${{ steps.rail.outputs.token }}
-        run: railway up --detach --yes --project 115986a1-6fec-48fa-ae29-764611dd1952 --service d7a68fc1-6d30-48fe-ab02-70285bb815b5 --environment 760537fc-57f1-457b-a7f8-0db0afcc6b1e
+        run: railway up --detach --yes --project 47912486-69fc-4bc1-a4ba-1d239e8de551 --service b5b020bc-7153-45db-a064-28c918dada1b --environment 0026202b-a334-4b33-b5c2-84bb065219d8
