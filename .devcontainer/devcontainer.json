@@ -1,6 +1,11 @@
 {
   "name": "lipatalk",
   "image": "mcr.microsoft.com/devcontainers/javascript-node:20",
+  "features": {
+    "ghcr.io/devcontainers/features/sshd:1": {
+      "version": "latest"
+    }
+  },
   "forwardPorts": [5173],
   "portsAttributes": {
     "5173": {
