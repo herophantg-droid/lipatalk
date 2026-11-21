@@ -54,6 +54,10 @@ button{cursor:pointer}
 .room-row .rn{flex:1;font-size:13px;font-weight:600}
 .room-row .rc{font-size:11px;color:var(--muted)}
 .room-row .mem{font-size:9px;background:linear-gradient(90deg,var(--amber),var(--pink));color:#0b0d1a;font-weight:900;padding:2px 6px;border-radius:20px}
+.room-row-wrap{display:flex;align-items:center;gap:6px}
+.room-row-wrap .room-row{flex:1;min-width:0}
+.room-del{flex:none;width:30px;height:34px;border:1px solid var(--line);background:rgba(255,95,162,.08);color:var(--pink);border-radius:10px;cursor:pointer;font-size:13px}
+.room-del:hover{background:rgba(255,95,162,.25)}
 .field{display:block;margin-bottom:16px}
 .field>span{display:block;font-size:12px;color:var(--muted);margin-bottom:7px;letter-spacing:.04em;text-transform:uppercase}
 .field input{width:100%;background:rgba(6,8,20,.65);border:1px solid var(--line);color:#fff;padding:13px 15px;border-radius:12px;outline:none;transition:.2s}
