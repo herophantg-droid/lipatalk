@@ -3,10 +3,6 @@ name: Create Codespace
 on:
   workflow_dispatch:
 
-permissions:
-  contents: read
-  codespaces: write
-
 jobs:
   create:
     runs-on: ubuntu-latest
