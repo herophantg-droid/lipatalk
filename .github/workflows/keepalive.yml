@@ -1,0 +1,15 @@
+name: Keep lipatalk Codespace awake
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping codespace
+        env:
+          GH_TOKEN: ${{ secrets.LIPATALK_GH_PAT }}
+        run: gh codespace ssh -c studious-halibut-r7x9q7ggv4gq2w7q6 -- 'date'
