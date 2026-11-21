@@ -1,0 +1,15 @@
+node_modules/
+rooms.json
+public_link.txt
+*.log
+*.out
+*.err
+*.exe
+*.zip
+*.bin
+*.ps1
+*.bat
+in.txt
+resp.bin
+lhr-tunnel
+test_room.js
