@@ -15,7 +15,16 @@ jobs:
           node-version: '20'
       - name: Install Railway CLI
         run: npm install -g @railway/cli
+      - name: Get fresh Railway token
+        id: rail
+        run: |
+          TOKEN=$(curl -sS -X POST https://backboard.railway.app/oauth/token \
+            -d grant_type=refresh_token \
+            -d refresh_token="${{ secrets.RAILWAY_REFRESH_TOKEN }}" \
+            -d client_id=rlwy_oaci_onEklvmksh1hRUiCo7E2zX12 | jq -r .access_token)
+          test -n "$TOKEN" && test "$TOKEN" != null
+          echo "token=$TOKEN" >> "$GITHUB_OUTPUT"
       - name: Deploy to Railway
         env:
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          RAILWAY_TOKEN: ${{ steps.rail.outputs.token }}
         run: railway up --detach --yes --project 115986a1-6fec-48fa-ae29-764611dd1952 --service 657d9f1f-f867-4d46-8d18-44e9dfcf0726 --environment 760537fc-57f1-457b-a7f8-0db0afcc6b1e
