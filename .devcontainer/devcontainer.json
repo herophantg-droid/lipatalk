@@ -14,6 +14,6 @@
       "protocol": "http"
     }
   },
-  "postCreateCommand": "nohup node server.js > /tmp/lipatalk.log 2>&1 &",
-  "postStartCommand": "pgrep -f 'node server.js' >/dev/null || nohup node server.js > /tmp/lipatalk.log 2>&1 &"
+  "postCreateCommand": "cd /workspaces/lipatalk && nohup node server.js > /tmp/lipatalk.log 2>&1 &",
+  "postStartCommand": "cd /workspaces/lipatalk && (pgrep -f 'node server.js' >/dev/null || nohup node server.js > /tmp/lipatalk.log 2>&1 &)"
 }
