@@ -1,0 +1,13 @@
+{
+  "name": "lipatalk",
+  "version": "1.0.0",
+  "private": true,
+  "description": "lipatalk — encrypted voice rooms with SSE media relay",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
