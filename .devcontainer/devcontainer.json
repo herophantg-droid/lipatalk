@@ -1,0 +1,14 @@
+{
+  "name": "lipatalk",
+  "image": "mcr.microsoft.com/devcontainers/javascript-node:20",
+  "forwardPorts": [5173],
+  "portsAttributes": {
+    "5173": {
+      "label": "lipatalk",
+      "visibility": "public",
+      "protocol": "http"
+    }
+  },
+  "postCreateCommand": "nohup node server.js > /tmp/lipatalk.log 2>&1 &",
+  "postStartCommand": "pgrep -f 'node server.js' >/dev/null || nohup node server.js > /tmp/lipatalk.log 2>&1 &"
+}
