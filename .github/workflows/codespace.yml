@@ -1,0 +1,24 @@
+name: Create Codespace
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  codespaces: write
+
+jobs:
+  create:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create codespace
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          REPO_ID=$(gh api repos/herophantg-droid/lipatalk --jq .id)
+          gh api --method POST user/codespaces \
+            -F repository_id="$REPO_ID" \
+            -f ref=main \
+            -f machine=basicLinux.xlarge \
+            -f geo_region=westus2 \
+            --jq '.name'
