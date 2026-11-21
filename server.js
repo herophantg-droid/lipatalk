@@ -256,6 +256,33 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, { ok: true });
     }
 
+    // Room management: only the creator (clientId stored in the browser) can
+    // delete a room or wipe its saved Pro "memory".
+    if (p === '/api/rooms/delete' && req.method === 'POST') {
+      const b = await readBody(req);
+      const roomId = String(b.roomId || '').toUpperCase();
+      const room = rooms.get(roomId);
+      if (!room) return json(res, 404, { error: 'Комната не найдена' });
+      if (room.owner !== String(b.owner || '')) return json(res, 403, { error: 'Удалять может только создатель' });
+      broadcast(roomId, 'room-deleted', { roomId });
+      for (const pid of [...room.participants.keys()]) cleanupPeer(pid);
+      rooms.delete(roomId);
+      if (saved[roomId]) { delete saved[roomId]; saveRooms(); }
+      return json(res, 200, { ok: true });
+    }
+
+    if (p === '/api/rooms/clear' && req.method === 'POST') {
+      const b = await readBody(req);
+      const roomId = String(b.roomId || '').toUpperCase();
+      const room = rooms.get(roomId);
+      if (!room) return json(res, 404, { error: 'Комната не найдена' });
+      if (room.owner !== String(b.owner || '')) return json(res, 403, { error: 'Очищать может только создатель' });
+      room.history = [];
+      if (saved[roomId]) { saved[roomId].history = []; saveRooms(); }
+      broadcast(roomId, 'chat-clear', { roomId });
+      return json(res, 200, { ok: true });
+    }
+
     if (p === '/api/leave' && req.method === 'POST') {
       const b = await readBody(req);
       cleanupPeer(String(b.peerId || ''));
