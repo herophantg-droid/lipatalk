@@ -9,6 +9,8 @@ const ROOT = path.join(__dirname, 'public');
 const DATA_FILE = path.join(__dirname, 'rooms.json');
 const rooms = new Map();      // roomId -> room
 const clients = new Map();    // peerId -> { res, roomId, name }
+const mediaQueues = new Map(); // peerId -> [{ type, from, data, seq }]
+let mediaSeq = 0;
 
 let saved = {};
 try { saved = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8')); } catch (_) { saved = {}; }
@@ -93,8 +95,24 @@ function publicRoom(r) {
   };
 }
 
+function queueMedia(roomId, peerId, type, data, exceptPeerId) {
+  const room = rooms.get(roomId);
+  if (!room) return;
+  const seq = ++mediaSeq;
+  for (const [pid] of room.participants) {
+    if (pid === exceptPeerId) continue;
+    const q = mediaQueues.get(pid) || [];
+    // Keep only the freshest chunks so a sleeping tab can't grow memory.
+    const limit = type === 'audio' ? 24 : 3;
+    if (q.length >= limit) q.splice(0, q.length - limit + 1);
+    q.push({ type, from: peerId, data, seq });
+    mediaQueues.set(pid, q);
+  }
+}
+
 function cleanupPeer(peerId) {
   const c = clients.get(peerId);
+  mediaQueues.delete(peerId);
   if (!c) return;
   clients.delete(peerId);
   const room = rooms.get(c.roomId);
@@ -247,12 +265,12 @@ const server = http.createServer(async (req, res) => {
     // so no STUN/TURN/UDP is needed (important on this network).
     if (p === '/api/audio' && req.method === 'POST') {
       const b = await readBody(req);
-      broadcast(String(b.roomId || ''), 'audio', { from: b.from, data: String(b.data || '') }, b.from);
+      queueMedia(String(b.roomId || '').toUpperCase(), String(b.from || ''), 'audio', String(b.data || ''), b.from);
       return json(res, 200, { ok: true });
     }
     if (p === '/api/video' && req.method === 'POST') {
       const b = await readBody(req);
-      broadcast(String(b.roomId || ''), 'video', { from: b.from, data: String(b.data || '') }, b.from);
+      queueMedia(String(b.roomId || '').toUpperCase(), String(b.from || ''), 'video', String(b.data || ''), b.from);
       return json(res, 200, { ok: true });
     }
 
@@ -281,6 +299,16 @@ const server = http.createServer(async (req, res) => {
       if (saved[roomId]) { saved[roomId].history = []; saveRooms(); }
       broadcast(roomId, 'chat-clear', { roomId });
       return json(res, 200, { ok: true });
+    }
+
+    // Media is delivered by short polling instead of long-lived SSE streams:
+    // several networks/tunnels kill SSE after ~1 minute, which made speech cut
+    // out in gaps. Polling uses ordinary HTTPS requests that always reconnect.
+    if (p === '/api/poll' && req.method === 'GET') {
+      const peerId = String(url.searchParams.get('peerId') || '');
+      const events = mediaQueues.get(peerId) || [];
+      if (events.length) mediaQueues.delete(peerId);
+      return json(res, 200, { events });
     }
 
     if (p === '/api/leave' && req.method === 'POST') {
