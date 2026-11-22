@@ -24,7 +24,8 @@ const S = {
   clientId: null, invited: [], keys: {},
   // E2EE: key comes from the URL fragment (#k=...), never sent to the server.
   inviteKey: null, roomKey: null, roomKeyB64: null, sendSeq: 0,
-  pendingAudio: {}, nextPlaySeq: {}, lastPlayedSeq: {}
+  pendingAudio: {}, nextPlaySeq: {}, lastPlayedSeq: {},
+  audioRecv: {}, audioErr: {}, audioErrShown: {}
 };
 
 /* ---------- utils ---------- */
@@ -311,7 +312,11 @@ function connectSSE() {
   on('peer-left', d => { removePeer(d.peerId); });
   on('peer-state', d => { if (!d.peer || d.peer.id === S.peerId) return; const p = S.peers.get(d.peer.id); if (p) { Object.assign(p, d.peer); renderPeers(); } });
   on('signal', d => handleSignal(d.from, d.data));
-  on('audio', d => { S.audioChunks = (S.audioChunks || 0) + 1; playAudioChunk(d.from, d.data); });
+  on('audio', d => {
+    S.audioChunks = (S.audioChunks || 0) + 1;
+    S.audioRecv[d.from] = (S.audioRecv[d.from] || 0) + 1;
+    playAudioChunk(d.from, d.data);
+  });
   on('video', async d => {
     S.videoChunks = (S.videoChunks || 0) + 1;
     const p = S.peers.get(d.from); if (!p) return;
@@ -520,7 +525,14 @@ async function playAudioChunk(from, data) {
       S.lastPlayedSeq[from] = seq;
     }
     playPCM(from, pt);
-  } catch (e) { console.warn('decrypt audio chunk', e); }
+  } catch (e) {
+    S.audioErr[from] = (S.audioErr[from] || 0) + 1;
+    if (!S.audioErrShown[from]) {
+      S.audioErrShown[from] = true;
+      toast('Не слышу участника — проверь, что он зашёл по ссылке с ключом 🔒');
+    }
+    console.warn('decrypt audio chunk', e);
+  }
 }
 function playPCM(from, bytes) {
   try {
@@ -1065,6 +1077,11 @@ setInterval(() => {
     if (c && c.state === 'suspended') c.resume().catch(() => {});
   });
 }, 500);
+document.addEventListener('pointerdown', () => {
+  [S.audioCtx, S.relayCtx, S.playCtx].forEach(c => {
+    if (c && c.state === 'suspended') c.resume().catch(() => {});
+  });
+}, true);
 setInterval(() => { if (!S.room) loadRoomList(); }, 10000);
 window.__NR = S; // debug handle
 if (params.get('room')) {
