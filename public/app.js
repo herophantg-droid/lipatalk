@@ -486,10 +486,14 @@ function startAudioRelay() {
       const ratio = ctx.sampleRate / RELAY_RATE;
       const n = Math.floor(input.length / ratio);
       const pcm = new Int16Array(n);
+      let prev = S.decimPrev || 0;
       for (let i = 0; i < n; i++) {
-        let v = input[Math.floor(i * ratio)] || 0;
-        pcm[i] = Math.max(-32768, Math.min(32767, v * 32767));
+        const v = input[Math.floor(i * ratio)] || 0;
+        // Simple one-pole low-pass before downsampling: avoids aliasing/hiss.
+        prev = prev * 0.45 + v * 0.55;
+        pcm[i] = Math.max(-32768, Math.min(32767, prev * 32767));
       }
+      S.decimPrev = prev;
       const bytes = new Uint8Array(pcm.buffer);
       seal(bytes).then(enc => {
         if (S.roomId) api('/api/audio', { roomId: S.roomId, from: S.peerId, data: enc });
@@ -532,8 +536,12 @@ function playPCM(from, bytes) {
     const ch = buf.getChannelData(0);
     for (let i = 0; i < pcm.length; i++) ch[i] = pcm[i] / 32768;
     const now = ctx.currentTime;
-    let t = S.nextPlayTime[from] || now;
-    if (t < now) t = now;
+    // Jitter buffer: always start a little in the future so a burst of chunks
+    // can be scheduled back-to-back. Without this, network jitter makes words
+    // break into syllables ("ап-ап").
+    const MIN_DELAY = 0.22;
+    let t = S.nextPlayTime[from];
+    if (t === undefined || t < now + MIN_DELAY || t > now + 1.2) t = now + MIN_DELAY;
     const src = ctx.createBufferSource(); src.buffer = buf; src.connect(ctx.destination);
     src.start(t);
     S.nextPlayTime[from] = t + buf.duration;
@@ -598,7 +606,7 @@ function startMediaPoll() {
       }
     } catch (_) {}
     S.mediaPollBusy = false;
-  }, 150);
+  }, 100);
 }
 function stopMediaPoll() { clearInterval(S.mediaPollTimer); S.mediaPollTimer = null; }
 
