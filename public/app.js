@@ -281,6 +281,7 @@ async function enterRoom(roomId, title, name, create) {
   b.peers.forEach(addPeer);
   renderPeers();
   connectSSE();
+  startMediaPoll();
   startTimer();
   await initMedia();
   startAudioRelay();
@@ -312,21 +313,8 @@ function connectSSE() {
   on('peer-left', d => { removePeer(d.peerId); });
   on('peer-state', d => { if (!d.peer || d.peer.id === S.peerId) return; const p = S.peers.get(d.peer.id); if (p) { Object.assign(p, d.peer); renderPeers(); } });
   on('signal', d => handleSignal(d.from, d.data));
-  on('audio', d => {
-    S.audioChunks = (S.audioChunks || 0) + 1;
-    S.audioRecv[d.from] = (S.audioRecv[d.from] || 0) + 1;
-    playAudioChunk(d.from, d.data);
-  });
-  on('video', async d => {
-    S.videoChunks = (S.videoChunks || 0) + 1;
-    const p = S.peers.get(d.from); if (!p) return;
-    try {
-      const { pt } = await open(d.data);
-      p.videoFrame = new TextDecoder().decode(pt);
-      const img = document.querySelector(`img[data-peer="${d.from}"]`);
-      if (img) img.src = p.videoFrame;
-    } catch (e) { console.warn('decrypt video frame', e); }
-  });
+  // Media comes from /api/poll (short polling) — SSE streams die after ~1 min
+  // on some tunnels, which caused gaps in speech.
   on('chat', d => appendChat(d));
   on('reaction', d => spawnReaction(d.emoji));
   on('room-expired', () => { toast('Время комнаты истекло — создай новую'); setTimeout(leaveRoom, 1200); });
@@ -580,6 +568,39 @@ function stopVideoRelay() {
   clearInterval(S.videoRelayTimer); S.videoRelayTimer = null;
   if (S.relayVideoEl) { S.relayVideoEl.pause(); S.relayVideoEl.srcObject = null; S.relayVideoEl = null; }
 }
+
+/* ---------- media polling (replaces long-lived SSE media events) ---------- */
+async function handleVideoFrame(from, data) {
+  S.videoChunks = (S.videoChunks || 0) + 1;
+  const p = S.peers.get(from); if (!p) return;
+  try {
+    const { pt } = await open(data);
+    p.videoFrame = new TextDecoder().decode(pt);
+    const img = document.querySelector(`img[data-peer="${from}"]`);
+    if (img) img.src = p.videoFrame;
+  } catch (e) { console.warn('decrypt video frame', e); }
+}
+function startMediaPoll() {
+  stopMediaPoll();
+  S.mediaPollBusy = false;
+  S.mediaPollTimer = setInterval(async () => {
+    if (!S.roomId || !S.peerId || S.mediaPollBusy) return;
+    S.mediaPollBusy = true;
+    try {
+      const r = await fetch(`/api/poll?peerId=${encodeURIComponent(S.peerId)}&roomId=${encodeURIComponent(S.roomId)}`, { cache: 'no-store' });
+      const j = await r.json();
+      for (const ev of (j.events || [])) {
+        if (ev.type === 'audio') {
+          S.audioChunks = (S.audioChunks || 0) + 1;
+          S.audioRecv[ev.from] = (S.audioRecv[ev.from] || 0) + 1;
+          playAudioChunk(ev.from, ev.data);
+        } else if (ev.type === 'video') handleVideoFrame(ev.from, ev.data);
+      }
+    } catch (_) {}
+    S.mediaPollBusy = false;
+  }, 150);
+}
+function stopMediaPoll() { clearInterval(S.mediaPollTimer); S.mediaPollTimer = null; }
 
 
 /* ---------- WebRTC mesh ---------- */
@@ -920,7 +941,6 @@ function initControls() {
   };
   $('#voice-btn').onclick = () => {
     if (!S.room) return;
-    if (!S.room.pro && !S.pro) return openUpgrade();
     openSettings('voice');
   };
   $('#bg-btn').onclick = () => openSettings('bg');
@@ -976,7 +996,7 @@ function openUpgrade() {
 function openSettings() {
   const effects = [['none','Без эффекта'],['robot','Робот'],['echo','Эхо'],['mutant','Мультик'],['deep','Низкий'],['chip','Чип']];
   const effectHTML = effects.map(([k, label]) =>
-    `<button class="opt ${S.effect === k ? 'active' : ''}" data-effect="${k}" ${!S.room?.pro && !S.pro && k !== 'none' ? 'disabled style="opacity:.4"' : ''}>${label}${k !== 'none' && !S.room?.pro && !S.pro ? ' 🔒' : ''}</button>`
+    `<button class="opt ${S.effect === k ? 'active' : ''}" data-effect="${k}">${label}</button>`
   ).join('');
   const bgHTML = Object.entries(BGS).map(([k, g]) =>
     `<button class="opt ${S.bg === k ? 'active' : ''}" data-bg="${k}" style="background:${g};color:#fff">${k}</button>`
@@ -1033,7 +1053,7 @@ function leaveRoom() {
   try { api('/api/leave', { peerId: S.peerId }); } catch (_) {}
   if (S.es) S.es.close();
   clearInterval(S.timer); clearInterval(S.silenceTimer); clearInterval(S.fxTimer);
-  stopAudioRelay(); stopVideoRelay();
+  stopAudioRelay(); stopVideoRelay(); stopMediaPoll();
   S.pcs.forEach(pc => pc.close()); S.pcs.clear();
   [S.rawStream, S.videoStream].forEach(s => s && s.getTracks().forEach(t => t.stop()));
   S.remoteAudios.forEach(a => a.remove()); S.remoteAudios.clear();
