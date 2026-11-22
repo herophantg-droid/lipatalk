@@ -25,7 +25,7 @@ const S = {
   // E2EE: key comes from the URL fragment (#k=...), never sent to the server.
   inviteKey: null, roomKey: null, roomKeyB64: null, sendSeq: 0,
   pendingAudio: {}, nextPlaySeq: {}, lastPlayedSeq: {},
-  audioRecv: {}, audioErr: {}, audioErrShown: {}
+  audioRecv: {}, audioErr: {}, audioErrShown: {}, playVolume: 1, playGain: null
 };
 
 /* ---------- utils ---------- */
@@ -542,7 +542,8 @@ function playPCM(from, bytes) {
     const MIN_DELAY = 0.22;
     let t = S.nextPlayTime[from];
     if (t === undefined || t < now + MIN_DELAY || t > now + 1.2) t = now + MIN_DELAY;
-    const src = ctx.createBufferSource(); src.buffer = buf; src.connect(ctx.destination);
+    if (!S.playGain) { S.playGain = ctx.createGain(); S.playGain.gain.value = S.playVolume; S.playGain.connect(ctx.destination); }
+    const src = ctx.createBufferSource(); src.buffer = buf; src.connect(S.playGain);
     src.start(t);
     S.nextPlayTime[from] = t + buf.duration;
   } catch (e) { console.warn('play audio chunk', e); }
@@ -753,7 +754,8 @@ async function appendChat(d) {
   const box = $('#chat-messages');
   const div = document.createElement('div');
   div.className = 'msg' + (d.from === S.peerId ? ' me' : '');
-  div.innerHTML = `<b>${escapeHTML(d.name || 'Гость')}</b>${escapeHTML(text)}`;
+  const tm = new Date(d.time || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  div.innerHTML = `<b>${escapeHTML(d.name || 'Гость')}<i>${tm}</i></b>${escapeHTML(text)}`;
   box.appendChild(div); box.scrollTop = box.scrollHeight;
   S.chatCount++; $('#chat-count').textContent = S.chatCount;
 }
@@ -1015,13 +1017,20 @@ function openSettings() {
     <h3>Проверка микрофона</h3>
     <div class="meter"><i id="mic-level"></i></div>
     <div class="hint" id="mic-level-text">говори — полоска должна двигаться</div>
+    <h3>Громкость участников</h3>
+    <div class="vol-row"><input id="vol-range" type="range" min="0" max="100" value="${Math.round(S.playVolume * 100)}"><span id="vol-val">${Math.round(S.playVolume * 100)}%</span></div>
     <h3>Фон комнаты</h3><div class="opt-grid">${bgHTML}</div>
     <h3>Войс-ченджер</h3><div class="opt-grid">${effectHTML}</div>
-    <p style="margin-top:14px">${S.room?.pro || S.pro ? 'Pro активен — эффекты доступны.' : 'Эффекты доступны в Pro.'}</p>`);
+    <p style="margin-top:14px">Эффекты работают прямо в браузере — доступны всем.</p>`);
   $('#m-avatar').onclick = () => {
     const inp = document.createElement('input'); inp.type = 'file'; inp.accept = 'image/*';
     inp.onchange = () => { const f = inp.files[0]; if (!f) return; const r = new FileReader(); r.onload = () => { S.avatar = r.result; savePrefs(); pushState(); renderPeers(); closeModal(); }; r.readAsDataURL(f); };
     inp.click();
+  };
+  $('#vol-range').oninput = e => {
+    S.playVolume = Number(e.target.value) / 100;
+    if (S.playGain) S.playGain.gain.value = S.playVolume;
+    $('#vol-val').textContent = e.target.value + '%';
   };
   $$('[data-bg]').forEach(b => b.onclick = () => { S.bg = b.dataset.bg; savePrefs(); applyStageBg(); closeModal(); });
   $$('[data-effect]').forEach(b => b.onclick = () => {
@@ -1054,6 +1063,8 @@ function startTimer() {
   const tick = () => {
     if (!S.room) return;
     $('#room-timer').textContent = S.room.pro ? '∞' : fmt(S.room.expiresAt - Date.now());
+    const got = Object.values(S.audioRecv || {}).reduce((a, b) => a + b, 0);
+    $('#net-status').textContent = `🔒 E2EE · ↓${got}`;
   };
   tick(); S.timer = setInterval(tick, 1000);
 }
@@ -1095,6 +1106,14 @@ if (params.get('fake') === '1' && navigator.mediaDevices) {
     return dest.stream;
   };
 }
+document.addEventListener('keydown', e => {
+  if (e.ctrlKey || e.metaKey || e.altKey || !S.room) return;
+  if (/INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName || '')) return;
+  const k = e.key.toLowerCase();
+  if (k === 'm') { $('#mic-btn').click(); e.preventDefault(); }
+  else if (k === 'c') { $('#cam-btn').click(); e.preventDefault(); }
+  else if (k === 's') { $('#screen-btn').click(); e.preventDefault(); }
+});
 loadPrefs();
 initLobby();
 initControls();
