@@ -103,7 +103,7 @@ function queueMedia(roomId, peerId, type, data, exceptPeerId) {
     if (pid === exceptPeerId) continue;
     const q = mediaQueues.get(pid) || [];
     // Keep only the freshest chunks so a sleeping tab can't grow memory.
-    const limit = type === 'audio' ? 24 : 3;
+    const limit = type === 'audio' ? 60 : 3;
     if (q.length >= limit) q.splice(0, q.length - limit + 1);
     q.push({ type, from: peerId, data, seq });
     mediaQueues.set(pid, q);
