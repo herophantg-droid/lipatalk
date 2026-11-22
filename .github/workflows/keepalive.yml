@@ -1,15 +1,27 @@
-name: Keep lipatalk Codespace awake
+name: Keep lipatalk alive
 
 on:
   schedule:
-    - cron: '*/10 * * * *'
+    - cron: '*/5 * * * *'
   workflow_dispatch:
 
 jobs:
-  ping:
+  keep:
     runs-on: ubuntu-latest
     steps:
-      - name: Ping codespace
+      - name: Ensure codespace is up and public
         env:
           GH_TOKEN: ${{ secrets.LIPATALK_GH_PAT }}
-        run: gh codespace ssh -c studious-halibut-r7x9q7ggv4gq2w7q6 -- 'date'
+        run: |
+          N=studious-halibut-r7x9q7ggv4gq2w7q6
+          st=$(gh api user/codespaces/$N --jq .state)
+          if [ "$st" != "Available" ]; then
+            gh api --method POST user/codespaces/$N/start >/dev/null || true
+            for i in $(seq 1 30); do
+              st=$(gh api user/codespaces/$N --jq .state)
+              [ "$st" = "Available" ] && break
+              sleep 10
+            done
+          fi
+          gh codespace ports visibility 5173:public -c "$N" || true
+          timeout 40 gh codespace ssh -c "$N" -- 'cd /workspaces/lipatalk; (pgrep -f "node server.js" >/dev/null || nohup setsid node server.js >/tmp/lipatalk.log 2>&1 </dev/null &); sleep 2; curl -sf http://localhost:5173/ >/dev/null' || true
